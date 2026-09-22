@@ -1,10 +1,12 @@
 from django.contrib.auth.decorators import login_required
+from django.db.models import Count
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_http_methods
 
-from inspection.models import Inspection
-from inspection.rules import judge
+from inspection.models import Inspection, Section
+from inspection.rules import judge, tag_rejection
 
 
 def _can_write(user) -> bool:
@@ -45,14 +47,39 @@ def logout_view(request):
 
 @login_required
 def list_view(request):
-    rows = Inspection.objects.all()
-    return render(request, "list.html", {"rows": rows, "can_write": _can_write(request.user)})
+    current = request.GET.get("section", "")
+    rows = Inspection.objects.select_related("section")
+    if current == "none":
+        rows = rows.filter(section__isnull=True)
+    elif current:
+        try:
+            rows = rows.filter(section_id=int(current))
+        except ValueError:
+            rows = rows.none()
+    list_url = reverse("list")
+    filters = [
+        {"label": "全部", "href": list_url, "active": current == ""},
+        {"label": "未贴", "href": f"{list_url}?section=none", "active": current == "none"},
+    ]
+    for section in Section.objects.all():
+        filters.append(
+            {
+                "label": section.name,
+                "href": f"{list_url}?section={section.pk}",
+                "active": current == str(section.pk),
+            }
+        )
+    return render(
+        request,
+        "list.html",
+        {"rows": rows, "filters": filters, "can_write": _can_write(request.user)},
+    )
 
 
 @login_required
 def detail_view(request, pk):
-    row = get_object_or_404(Inspection, pk=pk)
-    return render(request, "detail.html", {"row": row})
+    row = get_object_or_404(Inspection.objects.select_related("section"), pk=pk)
+    return render(request, "detail.html", {"row": row, "can_write": _can_write(request.user)})
 
 
 @login_required
@@ -84,3 +111,61 @@ def create_view(request):
             )
             return redirect("detail", pk=row.pk)
     return render(request, "form.html", {"error": error})
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def sections_view(request):
+    error = ""
+    if request.method == "POST":
+        if not _can_write(request.user):
+            return HttpResponseForbidden("仅持灯账号可维护水道区段")
+        name = request.POST.get("name", "").strip()
+        try:
+            min_cd = float(request.POST["min_cd"])
+            if not name:
+                raise ValueError("empty")
+        except (KeyError, ValueError):
+            error = "请填区段名称和标称亮度下限"
+        else:
+            if Section.objects.filter(name=name).exists():
+                error = f"区段「{name}」已存在"
+            else:
+                Section.objects.create(
+                    name=name, min_cd=min_cd, created_by=request.user.username
+                )
+                return redirect("sections")
+    sections = Section.objects.annotate(tagged_count=Count("inspections"))
+    return render(request, "sections.html", {"sections": sections, "error": error})
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def tag_view(request, pk):
+    if not _can_write(request.user):
+        return HttpResponseForbidden("仅持灯账号可贴区段标")
+    row = get_object_or_404(Inspection.objects.select_related("section"), pk=pk)
+    sections = Section.objects.all()
+    error = ""
+    if request.method == "POST":
+        try:
+            section = Section.objects.get(pk=int(request.POST.get("section_id", "")))
+        except (Section.DoesNotExist, TypeError, ValueError):
+            section = None
+        if section is None:
+            error = "请选择要贴的区段"
+        else:
+            reason = tag_rejection(row.measured_cd, section)
+            if reason:
+                error = reason
+            else:
+                row.section = section
+                row.save(update_fields=["section"])
+                return redirect(f"{reverse('list')}?section={section.pk}")
+    status = 400 if error else 200
+    return render(
+        request,
+        "tag.html",
+        {"row": row, "sections": sections, "error": error},
+        status=status,
+    )
