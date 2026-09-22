@@ -1,8 +1,16 @@
 {% extends "base.html" %}
 {% block body %}
 <h1>巡检记录</h1>
+<p class="filter">
+  区段：
+  {% if not active %}<strong>全部</strong>{% else %}<a href="{% url 'list' %}">全部</a>{% endif %}
+  {% if active == 'untagged' %}<strong>未贴</strong>{% else %}<a href="?section=untagged">未贴</a>{% endif %}
+  {% for s in sections %}
+    {% if active == s.pk|stringformat:"i" %}<strong>{{ s.name }}</strong>{% else %}<a href="?section={{ s.pk }}">{{ s.name }}</a>{% endif %}
+  {% endfor %}
+</p>
 <table>
-  <thead><tr><th>编号</th><th>实测光强</th><th>结论</th><th>说明</th><th></th></tr></thead>
+  <thead><tr><th>编号</th><th>实测光强</th><th>结论</th><th>说明</th><th>水道区段</th><th></th></tr></thead>
   <tbody>
   {% for row in rows %}
     <tr>
@@ -10,10 +18,11 @@
       <td>{{ row.measured_cd }}</td>
       <td class="{% if row.verdict == '合格' %}ok{% else %}bad{% endif %}">{{ row.verdict }}</td>
       <td>{{ row.note }}</td>
+      <td>{% if row.section %}{{ row.section.name }}{% else %}未贴{% endif %}</td>
       <td><a href="{% url 'detail' row.pk %}">详情</a></td>
     </tr>
   {% empty %}
-    <tr><td colspan="5">还没有记录</td></tr>
+    <tr><td colspan="6">还没有记录</td></tr>
   {% endfor %}
   </tbody>
 </table>

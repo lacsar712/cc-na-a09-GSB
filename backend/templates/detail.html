@@ -1,8 +1,26 @@
 {% extends "base.html" %}
 {% block body %}
 <h1>{{ row.aid_code }}</h1>
+{% if error %}<p class="err">{{ error }}</p>{% endif %}
 <p class="{% if row.verdict == '合格' %}ok{% else %}bad{% endif %}">{{ row.verdict }} · {{ row.note }}</p>
 <p>实测光强 {{ row.measured_cd }}，要求 {{ row.required_cd }}，方位偏差 {{ row.bearing_error_deg }} 度</p>
+<p>水道区段：{% if row.section %}{{ row.section.name }}（标称亮度下限 {{ row.section.min_cd }}）{% else %}未贴{% endif %}</p>
 <p>登记人 {{ row.created_by }}</p>
+{% if can_write %}
+  {% if sections %}
+  <form class="card" method="post" action="{% url 'tag_section' row.pk %}">
+    {% csrf_token %}
+    <label>贴到水道区段</label>
+    <select name="section_id">
+      {% for s in sections %}
+        <option value="{{ s.pk }}" {% if row.section_id == s.pk %}selected{% endif %}>{{ s.name }}（下限 {{ s.min_cd }}）</option>
+      {% endfor %}
+    </select>
+    <button type="submit">贴标</button>
+  </form>
+  {% else %}
+  <p>还没有水道区段，请先到<a href="{% url 'sections' %}">水道区段</a>页新建。</p>
+  {% endif %}
+{% endif %}
 <p><a href="{% url 'list' %}">返回列表</a></p>
 {% endblock %}
